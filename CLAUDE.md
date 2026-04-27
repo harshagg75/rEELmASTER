@@ -208,8 +208,8 @@ All tables defined in `migrations/001_initial_schema.sql`.
 ## Phase Status — Update This As You Build
 - [x] Phase 1 — Foundation (skeleton, config, schemas)
 - [x] Phase 2 — Ingestion Engine
-- [ ] Phase 3a — Memory Stores
-- [ ] Phase 3b — Agents 01-06
+- [x] Phase 3a — Memory Stores
+- [x] Phase 3b — Agents 01-06
 - [ ] Phase 3c — Agents 07-10 (QA + Notifier)
 - [ ] Phase 4 — LangGraph Pipeline
 - [ ] Phase 5 — Telegram Notifier + outputs/ posting brief

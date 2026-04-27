@@ -81,6 +81,7 @@ class ReelBrief(BaseModel):
     opening_line_hint: str
     clip_mood_preference: str
     strategic_notes: str
+    hook_test_mode: bool = False  # 20% chance set by OrchestratorAgent
 
 
 # ─────────────────────────────────────────────────────────────────────────────
