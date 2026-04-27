@@ -15,9 +15,8 @@ Goal: zero manual effort after dropping clips into the folder.
 - FFmpeg (video quality analysis + scene detection)
 - LangGraph (agent pipeline state machine)
 - APScheduler + SQLAlchemy jobstore (persistent checkpoint scheduling)
-- Instagram Graph API v21.0
+- python-telegram-bot (push notifications when reel is ready)
 - Railway (hosting, free tier)
-- Cloudflare R2 (video storage, 10GB free forever)
 - MoviePy (auto video editing from edit manifest)
 
 ## Project Structure
@@ -29,7 +28,7 @@ reelmind/
 │   ├── AGENTS.md
 │   ├── PIPELINE.md
 │   ├── MEMORY.md
-│   └── INSTAGRAM.md
+│   └── EDITOR.md
 ├── src/
 │   ├── config/
 │   │   ├── __init__.py
@@ -50,7 +49,7 @@ reelmind/
 │   │   ├── edit_spec.py        ← Agent 07
 │   │   ├── caption.py          ← Agent 08
 │   │   ├── qa.py               ← Agent 09
-│   │   ├── publisher.py        ← Agent 10
+│   │   ├── notifier.py         ← Agent 10
 │   │   ├── analytics.py        ← Agent 11
 │   │   ├── audience.py         ← Agent 12
 │   │   └── learning.py         ← Agent 13 (only writer to memory stores)
@@ -60,8 +59,7 @@ reelmind/
 │   │   ├── video_analysis.py   ← FFprobe + scene detection
 │   │   ├── transcription.py    ← faster-whisper local transcription
 │   │   ├── vector_db.py        ← Supabase pgvector client
-│   │   ├── instagram_api.py    ← publish + analytics + comments
-│   │   ├── r2_storage.py       ← Cloudflare R2 upload/URL
+│   │   ├── telegram_notifier.py ← send Telegram message with posting brief
 │   │   └── auto_editor.py      ← MoviePy: EditManifest → .mp4
 │   ├── pipeline/
 │   │   ├── __init__.py
@@ -71,6 +69,7 @@ reelmind/
 │   └── scripts/
 │       ├── ingest_clips.py     ← one-time library ingestion CLI
 │       ├── run_reel.py         ← on-demand or scheduled production
+│       ├── log_metrics.py      ← manual CLI to enter post metrics after posting
 │       └── health.py           ← FastAPI /health endpoint for Railway
 ├── tests/
 │   ├── test_ingestion.py
@@ -111,9 +110,9 @@ Never write a prompt string inside an agent file.
 - Writes: ONLY `src/agents/learning.py` (Agent 13)
 - No agent except 13 calls any `.update_*()` or `.upsert_*()` method
 
-### 5. Instagram API isolation
-ALL Instagram calls go through `src/tools/instagram_api.py`.
-No other file imports httpx and calls Instagram directly.
+### 5. Telegram notifier isolation
+ALL Telegram calls go through `src/tools/telegram_notifier.py`.
+No other file imports the Telegram bot client directly.
 
 ### 6. Logging
 Use loguru everywhere. Import: `from loguru import logger`
@@ -146,9 +145,9 @@ QA failures trigger revision loops — they are expected, not errors.
 | 07 | Edit Spec | Sonnet | typed_spec + storyboard | EditManifest |
 | 08 | Caption | Sonnet | typed_spec + manifest + hashtag_db | CaptionPackage |
 | 09 | QA | Sonnet | typed_spec + manifest + caption | QAReport |
-| 10 | Publisher | Sonnet + IG API | typed_spec + manifest + caption | PostMetadata |
-| 11 | Analytics | Sonnet + IG API | post_metadata + checkpoint | PerformanceReport |
-| 12 | Audience | Sonnet | post_metadata + perf_reports + comments | AudienceInsights |
+| 10 | Notifier | Sonnet | typed_spec + manifest + caption | PostingBrief |
+| 11 | Analytics | Sonnet | manual_metrics + post_log entry | PerformanceReport |
+| 12 | Audience | Sonnet | manual_metrics + typed comments text | AudienceInsights |
 | 13 | Learning | Sonnet | post_metadata + all_reports + insights | OrchestratorDeltaReport |
 
 ## The 6 Reel Strategies
@@ -173,18 +172,25 @@ Hard rule: never same type 3 posts in a row.
 | hashtag_velocity | T+24h + weekly decay | Agent 08 (Caption) |
 | format_performance | T+7d checkpoint | Agent 03 (Orchestrator) |
 | audience_preference | T+7d checkpoint | Agent 03 (Orchestrator) |
-| optimal_timing | T+30d checkpoint | Agent 10 (Publisher) |
+| optimal_timing | T+30d checkpoint | Agent 10 (Notifier) |
 
 All stores are read by Agent 03 (Orchestrator) via `memory.get_orchestrator_context()`.
 
 ## Learning Checkpoint Schedule
 
-| Checkpoint | When | Agents Run | Memory Updated |
-|------------|------|------------|----------------|
-| T+1h | 1 hour after post | 11 (Analytics) | hook_library |
-| T+24h | 24 hours after post | 11 (Analytics) + 13 (Learning) | clip_performance, hashtag_velocity |
+Checkpoints are triggered manually by running `python src/scripts/log_metrics.py --post-id <id>`.
+The CLI prompts for: views, saves, shares, comments count, follows gained, comments text (paste).
+Agent 11 then computes derived metrics; Agent 13 updates memory stores.
+
+| Checkpoint | When to Run | Agents Run | Memory Updated |
+|------------|-------------|------------|----------------|
+| T+1h | ~1 hour after you post | 11 (Analytics) | hook_library |
+| T+24h | next day | 11 (Analytics) + 13 (Learning) | clip_performance, hashtag_velocity |
 | T+7d | 7 days after post | 11 + 12 + 13 (full cycle) | format_performance, audience_preference |
 | T+30d | 30 days after post | 11 + 12 + 13 (full cycle) | optimal_timing, all stores re-normalized |
+
+The CLI accepts a `--checkpoint` flag (t1h | t24h | t7d | t30d) to run the correct agent set.
+Example: `python src/scripts/log_metrics.py --post-id abc123 --checkpoint t24h`
 
 ## Supabase Tables Needed
 1. clips (video metadata + pgvector embedding)
@@ -200,14 +206,15 @@ All stores are read by Agent 03 (Orchestrator) via `memory.get_orchestrator_cont
 All tables defined in `migrations/001_initial_schema.sql`.
 
 ## Phase Status — Update This As You Build
-- [ ] Phase 1 — Foundation (skeleton, config, schemas)
-- [ ] Phase 2 — Ingestion Engine
+- [x] Phase 1 — Foundation (skeleton, config, schemas)
+- [x] Phase 2 — Ingestion Engine
 - [ ] Phase 3a — Memory Stores
 - [ ] Phase 3b — Agents 01-06
-- [ ] Phase 3c — Agents 07-13
+- [ ] Phase 3c — Agents 07-10 (QA + Notifier)
 - [ ] Phase 4 — LangGraph Pipeline
-- [ ] Phase 5 — Instagram API
+- [ ] Phase 5 — Telegram Notifier + outputs/ posting brief
 - [ ] Phase 6 — Auto Editor (MoviePy)
-- [ ] Phase 7 — Local Testing
-- [ ] Phase 8 — Deploy to Railway
-- [ ] Phase 9 — Prompt Tuning (after 10 real posts)
+- [ ] Phase 7 — Manual Metrics CLI (log_metrics.py) + Agents 11-13
+- [ ] Phase 8 — Local Testing (end-to-end dry run)
+- [ ] Phase 9 — Deploy to Railway
+- [ ] Phase 10 — Prompt Tuning (after 10 real posts)

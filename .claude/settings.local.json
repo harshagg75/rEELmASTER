@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install *)",
+      "Bash(python -c ' *)",
+      "Bash(python *)",
+      "Bash(where ffmpeg *)",
+      "Bash(where ffprobe *)",
+      "Read(//c//**)",
+      "Read(//c/Program Files/**)",
+      "Read(//c/Users/Harsh/AppData/Local/**)"
+    ]
+  }
+}
